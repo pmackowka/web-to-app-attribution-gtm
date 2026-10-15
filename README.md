@@ -152,26 +152,6 @@ window.__smartscript.saver.getTrafficData(location.href, document.referrer, "coo
 
 **Dane w BigQuery** — `sql/smartscript_installs_check.sql`: instalacje z `af_channel = 'af_web_smartscript'` per marka, z rozbiciem na `af_sub1–4` i odsetkiem instalacji z GA client id. Zapytanie nie było uruchomione na danych — przy pierwszym użyciu zrób dry-run.
 
-## Poprawki względem pierwotnej wersji
-
-| Błąd | Skutek | Poprawka |
-|---|---|---|
-| `fromFacebook()` wołał nieistniejące `parser.getSource()` | `TypeError` na każdym urządzeniu mobilnym, linki nie były przepisywane | sprawdzenie `trafficData.source` |
-| brak `return` przy `clickid` w budowie `af_sub3` | `gclid` nigdy nie trafiał do `af_sub3` | dodany `return` |
-| `updateParam()` nie enkodował wartości | kampanie ze spacją, `%`, `&` psuły link | `encodeURIComponent` |
-| `updateParam()` przenosił parametr na koniec | kolejność inna niż w scenariuszach testowych | podmiana w miejscu |
-| `af_r` (Dynamic Link) doklejany bez enkodowania | parametry FDL (`apn`, `utm_*`) wpadały do OneLinka | `af_r` zakodowany |
-| `isOutsideTraffic()` wołane dwa razy w trybie `testing` | drugie wywołanie zawsze `false`, test pokazywał inne zachowanie niż produkcja | jedno wywołanie |
-| `isPaid()` w `getData()` bez referrera | organic i referral liczone niepoprawnie w `lastPaid` | referrer przekazany |
-| `console.log` danych na produkcji | wyciek danych o źródle ruchu do konsoli | log tylko przy `testing` |
-| `getCookie()` dopasowywał po `indexOf` | trafienie w cookie o podobnej nazwie | dopasowanie prefiksu |
-| `deleteCookie()` bez domeny | nie usuwał cookie z `.domena` | domena i ścieżka |
-| zniekształcony `%` w URL | `URIError` wywracał cały tag | `try/catch` |
-| uszkodzony JSON w `_smsc`, zablokowany localStorage | wyjątek, brak linków | fallback |
-| `af_sub3` = `null\|null` bez UTM | śmieci w raw data | parametr pominięty |
-| `addParam` ucinał do `limit-1`, `updateParam` do `limit` | niespójne długości | jeden limit |
-| listener porównywał `className ==` | baner z więcej niż jedną klasą niewykryty | `classList.contains`, obserwacja `body` |
-| marka wybierana regexem wpisanym w kod | nowa marka = zmiana logiki | `BRAND_HOSTS` w konfiguracji |
 
 ## Stan zależności (październik 2026)
 
