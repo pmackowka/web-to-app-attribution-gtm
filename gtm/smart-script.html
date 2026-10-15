@@ -1,0 +1,772 @@
+<script>
+/**
+ * Smart Script — atrybucja web → app
+ *
+ * Tag GTM (Custom HTML). Zapamiętuje źródło ruchu webowego (UTM, gclid/dclid/fbclid,
+ * GA client id) i dokleja je do linków prowadzących do aplikacji (AppsFlyer OneLink,
+ * opcjonalnie Firebase Dynamic Link), żeby instalacja i zakup w aplikacji dostały
+ * atrybucję do kampanii, która przyprowadziła użytkownika na www.
+ *
+ * Triggery: DOM Ready, custom event `page`, custom event `mobile_app_banner`.
+ * Szczegóły: README.md.
+ *
+ * Kod celowo w ES5 — kompilator Custom HTML w GTM nie przepuszcza ES6.
+ */
+(function() {
+'use strict';
+
+/* ==========================================================================
+ * KONFIGURACJA
+ * ========================================================================== */
+
+// true = logi w konsoli + podmiana linków także na desktopie (do testów na stage)
+var testing = false;
+
+// Gdzie trzymać zapamiętane źródło ruchu: "cookie" (domyślnie) lub "localStorage"
+var storage = "cookie";
+
+// Czas życia cookie `_smsc` w dniach (90 = bliżej okna atrybucji GA)
+var cookieDays = 30;
+
+// Model atrybucji: "default" (last non-direct), "lastClick", "lastPaid"
+var attribution = "lastClick";
+
+// Wariant mapowania parametrów OneLink: "v1", "v2" lub "v3" (tabela w README)
+var version = "v2";
+
+// Firebase Dynamic Links — Google wyłączył usługę 25.08.2025, zostaw false
+var useDynamicLinks = false;
+
+// false = pomijaj planszę preview Dynamic Link (doklejane efr=1)
+var useDynamicLinksPreview = false;
+
+// true = ruch web→app raportowany w AppsFlyer jako retargeting (jak sieci retargetingowe)
+var isRetargeting = false;
+
+// Linki, które skrypt przepisuje na OneLink
+var LINK_SELECTORS = [
+    'a[href*="//play.google.com/"]',
+    'a[href*="//apps.apple.com/"]',
+    'a[href*="onelink.me"]'
+].join(",");
+
+// Konfiguracja aplikacji per marka. Wartości przykładowe — podmień na własne.
+var APPS = {
+    brand_a: {
+        oneLinkURL: "https://example-shop.onelink.me/AbCd",
+        dynamicLinkURL: "https://exampleshop.page.link/abc1",
+        androidAppId: "pl.example.shop",
+        iosAppId: "pl.example.shop",
+        appStoreId: "1000000001"
+    },
+    brand_b: {
+        oneLinkURL: "https://example-outlet.onelink.me/EfGh",
+        dynamicLinkURL: "https://exampleoutlet.page.link/efg2",
+        androidAppId: "pl.example.outlet",
+        iosAppId: "pl.example.outlet",
+        appStoreId: "1000000002"
+    }
+};
+
+// Marka wybierana po hostname: pierwsze dopasowanie wygrywa, brak dopasowania = DEFAULT_BRAND
+var BRAND_HOSTS = [
+    {pattern: /example-outlet\./i, brand: "brand_b"}
+];
+var DEFAULT_BRAND = "brand_a";
+
+/* ==========================================================================
+ * HELPER — URL, cookie
+ * ========================================================================== */
+var helper = (function() {
+    var instance = {};
+
+    /**
+     * Zwraca wartość parametru z adresu URL.
+     *
+     * @param {string} name nazwa parametru
+     * @param {string} address adres URL (domyślnie location.href)
+     * @param {*} missing wartość zwracana, gdy parametru brak
+     */
+    instance.getParam = function(name, address, missing) {
+        if (!missing) {
+            missing = '';
+        }
+        if (!address) {
+            address = location.href;
+        }
+        var params = instance.link(address).search;
+        params.substr(1).split("&").forEach(function(item) {
+            var tmp = item.split("=");
+            if (tmp[0] === name && typeof tmp[1] !== 'undefined') {
+                // FIX: zniekształcony %-encoding rzucał URIError i wywracał cały tag
+                try {
+                    missing = decodeURIComponent(tmp[1].replace(/\+/g, ' '));
+                } catch (e) {
+                    missing = tmp[1];
+                }
+            }
+        });
+        return missing;
+    };
+
+    /**
+     * Parsuje URL przez element <a> — daje dostęp do host, search, pathname.
+     */
+    instance.link = function(address) {
+        var link = document.createElement('a');
+        link.setAttribute('href', address);
+        return link;
+    };
+
+    /**
+     * Domena najwyższego poziomu, na której da się ustawić cookie
+     * (dla www.example-shop.com.pl → example-shop.com.pl).
+     */
+    instance.topDomain = (function() {
+        var host, cookie = '_smtd=1', hostname = document.location.hostname.split('.');
+        for (var i = hostname.length - 1; i >= 0; i--) {
+            host = hostname.slice(i).join('.');
+            document.cookie = cookie + ';domain=.' + host + ';path=/';
+            if (document.cookie.indexOf(cookie) > -1) {
+                document.cookie = cookie.split('=')[0] + '=;domain=.' + host + ';path=/;expires=Thu, 01 Jan 1970 00:00:01 GMT';
+                return host;
+            }
+        }
+        // FIX: fallback dla hostów bez kropki (localhost) — wcześniej domain=.undefined
+        return document.location.hostname;
+    })();
+
+    /**
+     * Zwraca wartość cookie albo `missing`, gdy cookie nie istnieje.
+     */
+    instance.getCookie = function(name, missing) {
+        if (typeof missing === 'undefined') {
+            missing = '';
+        }
+        var cookieName = name + "=";
+        var cookieArray = document.cookie.split(';');
+        for (var i = 0; i < cookieArray.length; i++) {
+            var cookie = cookieArray[i];
+            while (cookie.charAt(0) === ' ') cookie = cookie.substring(1);
+            // FIX: było indexOf !== -1, co łapało też cookie o nazwie z tym samym sufiksem
+            if (cookie.indexOf(cookieName) === 0) {
+                return cookie.substring(cookieName.length, cookie.length);
+            }
+        }
+        return missing;
+    };
+
+    /**
+     * Ustawia cookie na domenie najwyższego poziomu. Bez `days` = cookie sesyjne.
+     */
+    instance.makeCookie = function(name, value, days) {
+        var expires = "";
+        if (days) {
+            var date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            expires = "; expires=" + date.toUTCString();
+        }
+        var cookie = name + "=" + (value || "") + expires;
+        cookie += "; domain=." + instance.topDomain + "; path=/; SameSite=Lax";
+        document.cookie = cookie;
+    };
+
+    /**
+     * Usuwa cookie.
+     */
+    instance.deleteCookie = function(name) {
+        // FIX: bez domain/path nie dało się usunąć cookie ustawionego na .domena
+        document.cookie = name + '=; Max-Age=-99999999; domain=.' + instance.topDomain + '; path=/';
+    };
+
+    return instance;
+})();
+
+/* ==========================================================================
+ * PARSER — źródło ruchu bieżącej sesji (odwzorowanie logiki Universal Analytics)
+ * ========================================================================== */
+var parser = (function() {
+    var instance = {};
+    // Cookie sesyjne: "źródło tej sesji już zostało odczytane"
+    var COOKIE_NAME = "_smsess";
+
+    instance.clearCookies = function() {
+        return helper.deleteCookie(COOKIE_NAME);
+    };
+
+    /**
+     * Host z referrera albo null (wejście bezpośrednie).
+     */
+    instance.parseReferrer = function(referrer) {
+        if (!referrer) {
+            return null;
+        }
+        return helper.link(referrer).host;
+    };
+
+    /**
+     * Czy bieżące wywołanie to wejście z zewnątrz (początek nowej sesji źródła).
+     * Ruch płatny i oznaczony UTM zawsze nadpisuje. Ruch bez oznaczeń liczy się
+     * tylko raz na sesję przeglądarki — pilnuje tego cookie `_smsess`.
+     */
+    instance.isOutsideTraffic = function(url, referrer) {
+        var refHost = instance.parseReferrer(referrer);
+        if (instance.isPaid(url, referrer)) {
+            return true;
+        }
+        var utms = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
+        for (var i = 0; i < utms.length; i++) {
+            if (helper.getParam(utms[i], url)) {
+                return true;
+            }
+        }
+        if (helper.getCookie(COOKIE_NAME)) {
+            return false;
+        }
+        helper.makeCookie(COOKIE_NAME, "true");
+        if (!refHost) {
+            return true;
+        }
+        // Referrer z tej samej domeny = nawigacja wewnętrzna
+        if (url.indexOf(refHost) > -1) {
+            return false;
+        }
+        return true;
+    };
+
+    /**
+     * Ruch płatny = wszystko poza direct, organic i referral.
+     */
+    instance.isPaid = function(url, referrer) {
+        var medium = instance.parseMedium(url, referrer);
+        var isFree = (medium == "(none)") || (medium == "referral") || (medium == "organic");
+        return !isFree;
+    };
+
+    instance.parseSource = function(url, referrer) {
+        var value = helper.getParam("utm_source", url, null);
+        if (!value && instance.parseGclid(url)) {
+            value = "google";
+        }
+        if (!value && instance.parseDclid(url)) {
+            value = "dfa";
+        }
+        if (!value && instance.parseFbclid(url)) {
+            value = "facebook";
+        }
+        if (!value) {
+            var ref = instance.parseReferrer(referrer);
+            if (ref) {
+                if (url.indexOf(ref) > -1) {
+                    value = "direct";
+                } else if (ref.indexOf("google") > -1) {
+                    value = "google";
+                } else {
+                    value = ref;
+                }
+            } else {
+                value = "direct";
+            }
+        }
+        return value;
+    };
+
+    instance.parseMedium = function(url, referrer) {
+        var value = helper.getParam("utm_medium", url, null);
+        if (!value && instance.parseGclid(url)) {
+            value = "cpc";
+        }
+        if (!value && instance.parseDclid(url)) {
+            value = "cpm";
+        }
+        if (!value && instance.parseFbclid(url)) {
+            value = "cpc";
+        }
+        if (!value) {
+            var ref = instance.parseReferrer(referrer);
+            if (ref) {
+                if (url.indexOf(ref) > -1) {
+                    value = "(none)";
+                } else if (ref.indexOf("google") > -1) {
+                    value = "organic";
+                } else {
+                    value = "referral";
+                }
+            } else {
+                value = "(none)";
+            }
+        }
+        return value;
+    };
+
+    instance.parseCampaign = function(url) {
+        return helper.getParam("utm_campaign", url, null) || "(not set)";
+    };
+
+    instance.parseKeyword = function(url) {
+        return helper.getParam("utm_term", url, null);
+    };
+
+    instance.parseAd = function(url) {
+        return helper.getParam("utm_content", url, null);
+    };
+
+    instance.parseGclid = function(url) {
+        return helper.getParam("gclid", url, null);
+    };
+
+    instance.parseDclid = function(url) {
+        return helper.getParam("dclid", url, null);
+    };
+
+    instance.parseFbclid = function(url) {
+        return helper.getParam("fbclid", url, null);
+    };
+
+    /**
+     * Client ID z cookie `_ga` (GA1.1.123.456 → 123.456).
+     */
+    instance.getClientID = function() {
+        var clientID = helper.getCookie("_ga");
+        if (clientID) {
+            return clientID.split(".").slice(-2).join(".");
+        }
+        return null;
+    };
+
+    /**
+     * Pierwszy znaleziony identyfikator kliknięcia: gclid > dclid > fbclid.
+     */
+    instance.parseClickID = function(url) {
+        return instance.parseGclid(url) || instance.parseDclid(url) || instance.parseFbclid(url) || "";
+    };
+
+    /**
+     * Pełny zestaw danych o źródle ruchu dla bieżącego URL i referrera.
+     */
+    instance.getData = function(url, referrer) {
+        return {
+            "source": instance.parseSource(url, referrer),
+            "medium": instance.parseMedium(url, referrer),
+            "campaign": instance.parseCampaign(url),
+            "keyword": instance.parseKeyword(url),
+            "ad": instance.parseAd(url),
+            "gclid": instance.parseGclid(url),
+            "dclid": instance.parseDclid(url),
+            "fbclid": instance.parseFbclid(url),
+            // FIX: isPaid dostawał tylko url, bez referrera
+            "paid": instance.isPaid(url, referrer),
+            "clickid": instance.parseClickID(url),
+            "cid": instance.getClientID()
+        };
+    };
+
+    return instance;
+})();
+
+/* ==========================================================================
+ * SAVER — zapis i wybór źródła ruchu wg modelu atrybucji
+ * ========================================================================== */
+var saver = (function() {
+    var instance = {};
+    // Cookie / klucz localStorage z zapamiętanym źródłem ruchu (JSON)
+    var COOKIE_NAME = "_smsc";
+
+    instance.getStoredValue = function(method) {
+        if (method == "localStorage") {
+            try {
+                return localStorage.getItem(COOKIE_NAME);
+            } catch (e) {
+                return null;
+            }
+        }
+        return helper.getCookie(COOKIE_NAME);
+    };
+
+    instance.storeValue = function(strValue, method) {
+        if (method == "localStorage") {
+            try {
+                return localStorage.setItem(COOKIE_NAME, strValue);
+            } catch (e) {
+                // localStorage niedostępny (tryb prywatny, blokada) — spadamy na cookie
+            }
+        }
+        return helper.makeCookie(COOKIE_NAME, strValue, cookieDays);
+    };
+
+    /**
+     * Parsuje zapisany JSON. Pusty lub uszkodzony → null.
+     */
+    instance.parseData = function(strValue) {
+        if (!strValue) {
+            return null;
+        }
+        try {
+            return JSON.parse(strValue);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * Wybiera, które dane zapisać: poprzednie czy bieżące.
+     *
+     * default   — last non-direct click (jak Universal Analytics)
+     * lastClick — zawsze bieżąca sesja
+     * lastPaid  — ruch płatny nadpisywany tylko przez inny ruch płatny (jak Campaign Manager)
+     */
+    instance.pickCorrectData = function(previousData, currentData, model) {
+        if (!previousData) {
+            return currentData;
+        }
+        if (model == "lastClick") {
+            return currentData;
+        }
+        if (model == "lastPaid") {
+            if (currentData.paid || !previousData.paid) {
+                return currentData;
+            }
+            return previousData;
+        }
+        if (currentData.source == "direct") {
+            return previousData;
+        }
+        return currentData;
+    };
+
+    /**
+     * Jedyna publiczna metoda: zwraca dane o źródle ruchu do doklejenia do linku.
+     */
+    instance.getTrafficData = function(url, referrer, method, model, testing) {
+        // FIX: isOutsideTraffic ma efekt uboczny (ustawia _smsess) — oryginał wołał go
+        // dwa razy w trybie testing, przez co drugi wynik był zawsze false
+        var outside = parser.isOutsideTraffic(url, referrer);
+        if (testing) {
+            console.log("[SmartScript] outside traffic: " + outside);
+        }
+        if (outside) {
+            var currentData = parser.getData(url, referrer);
+            var previousData = instance.parseData(instance.getStoredValue(method));
+            var data = instance.pickCorrectData(previousData, currentData, model);
+            var strData = JSON.stringify(data);
+            if (testing) {
+                console.log("[SmartScript] stored in " + method + ": " + strData);
+            }
+            instance.storeValue(strData, method);
+            return data;
+        }
+        // FIX: oryginał logował dane do konsoli także na produkcji
+        return instance.parseData(instance.getStoredValue(method)) || parser.getData(url, referrer);
+    };
+
+    return instance;
+})();
+
+/* ==========================================================================
+ * GENERATOR — budowa linku OneLink / Dynamic Link
+ * ========================================================================== */
+var generator = (function() {
+    var instance = {};
+
+    /**
+     * Desktop = brak window.orientation (API przestarzałe, ale nadal obecne
+     * w mobilnych Safari i Chrome).
+     */
+    instance.isDesktop = function() {
+        return !(
+            typeof window.orientation !== "undefined" ||
+            navigator.userAgent.indexOf("IEMobile") !== -1
+        );
+    };
+
+    /**
+     * Użytkownik trafił na www z OneLinka (fallback na web) — nie nadpisujemy.
+     */
+    function fromOneLink() {
+        return window.location.href.indexOf("af_redirect") > -1;
+    }
+
+    /**
+     * Ruch z Facebooka — nie nadpisujemy, Meta jest SRN i atrybuuje sama.
+     * FIX: oryginał wołał nieistniejące parser.getSource() → TypeError na każdym mobile.
+     */
+    function fromFacebook(trafficData) {
+        return String(trafficData.source || "").indexOf("facebook") > -1;
+    }
+
+    // Limity długości parametrów OneLink (dokumentacja AppsFlyer)
+    var limits = {
+        "pid": 50,
+        "c": 100,
+        "af_siteid": 24,
+        "af_sub_siteid": 50,
+        "af_adset": 100,
+        "af_adset_id": 24,
+        "af_ad": 100,
+        "af_ad_id": 24,
+        "af_ad_type": 24,
+        "af_c_id": 24,
+        "af_channel": 20,
+        "af_sub1": 100,
+        "af_sub2": 100,
+        "af_sub3": 100,
+        "af_sub4": 100,
+        "af_sub5": 100
+    };
+
+    function prepareValue(name, value) {
+        value = String(value);
+        if (limits.hasOwnProperty(name)) {
+            // FIX: addParam ucinał do limitu-1, updateParam do limitu — teraz spójnie
+            value = value.substr(0, limits[name]);
+        }
+        return encodeURIComponent(value);
+    }
+
+    /**
+     * Dokleja parametr na koniec URL, jeśli wartość niepusta.
+     */
+    function addParam(link, name, value) {
+        if (value) {
+            var separator = link.indexOf("?") > -1 ? "&" : "?";
+            link += separator + name + "=" + prepareValue(name, value);
+        }
+        return link;
+    }
+
+    /**
+     * Podmienia parametr w miejscu (albo dokleja, gdy go nie ma).
+     * Pusta wartość usuwa parametr.
+     * FIX: oryginał nie enkodował wartości — kampanie ze spacją, % lub & psuły link.
+     */
+    function updateParam(url, name, value) {
+        var parts = url.split("?");
+        var base = parts[0];
+        var query = parts.length > 1 ? parts.slice(1).join("?").split("&") : [];
+        var out = [];
+        var replaced = false;
+        for (var i = 0; i < query.length; i++) {
+            if (!query[i]) {
+                continue;
+            }
+            if (query[i].split("=")[0] === name) {
+                if (value && !replaced) {
+                    out.push(name + "=" + prepareValue(name, value));
+                }
+                replaced = true;
+            } else {
+                out.push(query[i]);
+            }
+        }
+        if (!replaced && value) {
+            out.push(name + "=" + prepareValue(name, value));
+        }
+        return out.length ? base + "?" + out.join("&") : base;
+    }
+
+    function applyParams(links, params, fn) {
+        for (var i = 0; i < params.length; i++) {
+            var p = params[i];
+            if (p.one && links.oneLink) {
+                links.oneLink = fn(links.oneLink, p.one, p.value);
+            }
+            if (p.dynamic && links.dynamicLink) {
+                links.dynamicLink = fn(links.dynamicLink, p.dynamic, p.value);
+            }
+            if (p.deep && links.deepLink) {
+                links.deepLink = fn(links.deepLink, p.deep, p.value);
+            }
+        }
+    }
+
+    /**
+     * Buduje finalny link do aplikacji.
+     *
+     * @param {string} currentURL bieżący href linku — zwracany bez zmian, gdy nie podmieniamy
+     * @param {object} appData konfiguracja OneLink / Dynamic Link
+     * @param {object} trafficData dane z saver.getTrafficData
+     * @param {array} additionalParams parametry doklejane, np. {"one": "af_sub1", "value": "x"}
+     * @param {array} overwriteParams parametry nadpisywane
+     * @param {boolean} testing pomija warunek desktop/OneLink/Facebook
+     */
+    instance.generateUrl = function(currentURL, appData, trafficData, additionalParams, overwriteParams, testing) {
+        if (!testing) {
+            if (instance.isDesktop() || fromOneLink() || fromFacebook(trafficData)) {
+                return currentURL;
+            }
+        }
+        var links = {
+            oneLink: appData.oneLinkURL,
+            dynamicLink: appData.dynamicLinkURL,
+            deepLink: appData.deepLinkURL
+        };
+
+        // Bazowy OneLink
+        if (links.oneLink) {
+            if (trafficData.source && trafficData.medium) {
+                links.oneLink = addParam(links.oneLink, "pid", trafficData.source + "|" + trafficData.medium + "|www");
+            } else {
+                links.oneLink = addParam(links.oneLink, "pid", "af_smartscript");
+            }
+            links.oneLink = addParam(links.oneLink, "c", trafficData.campaign);
+            links.oneLink = addParam(links.oneLink, "af_ad", trafficData.ad);
+            links.oneLink = addParam(links.oneLink, "af_keywords", trafficData.keyword);
+        }
+
+        // Bazowy Dynamic Link
+        if (links.dynamicLink) {
+            links.dynamicLink = addParam(links.dynamicLink, "utm_source", trafficData.source);
+            links.dynamicLink = addParam(links.dynamicLink, "utm_medium", trafficData.medium);
+            links.dynamicLink = addParam(links.dynamicLink, "utm_campaign", trafficData.campaign);
+            links.dynamicLink = addParam(links.dynamicLink, "utm_content", trafficData.ad);
+            links.dynamicLink = addParam(links.dynamicLink, "utm_term", trafficData.keyword);
+            links.dynamicLink = addParam(links.dynamicLink, "gclid", trafficData.gclid);
+            links.dynamicLink = addParam(links.dynamicLink, "apn", appData.androidAppId);
+            links.dynamicLink = addParam(links.dynamicLink, "ibi", appData.iosAppId);
+            links.dynamicLink = addParam(links.dynamicLink, "isi", appData.appStoreId);
+        }
+
+        applyParams(links, additionalParams || [], addParam);
+        applyParams(links, overwriteParams || [], updateParam);
+
+        var result;
+        if (links.dynamicLink) {
+            links.dynamicLink = addParam(links.dynamicLink, "link", links.deepLink);
+        }
+        if (links.oneLink && links.dynamicLink) {
+            // FIX: af_r nie był enkodowany — parametry Dynamic Linka wpadały do OneLinka
+            result = addParam(links.oneLink, "af_r", links.dynamicLink);
+        } else {
+            result = links.oneLink || links.dynamicLink;
+        }
+        if (testing) {
+            console.log("[SmartScript] " + result);
+        }
+        return result;
+    };
+
+    return instance;
+})();
+
+/* ==========================================================================
+ * MAPOWANIE PARAMETRÓW (v1 / v2 / v3)
+ * ========================================================================== */
+
+/**
+ * Grupowanie media source dla v3 — czytelniejsze raporty w UI AppsFlyer.
+ * Wzorce `utm_source` są przykładowe — podmień na źródła z własnego planu mediowego.
+ */
+function getGroupedPID(trafficData) {
+    var source = trafficData.source || "";
+    if (/retargeting_a|retargeting_b/i.test(source)) {
+        return "Remarketing zewnętrzny";
+    }
+    if (/display_a|display_b|dfa/i.test(source)) {
+        return "Display";
+    }
+    if (/google|bing|yahoo|duckduckgo/i.test(source)) {
+        return "Organic";
+    }
+    if (/webpush_a/i.test(source)) {
+        return "Web push";
+    }
+    if (/partner_a|partner_b|partner_c/i.test(source)) {
+        return "Afiliacja";
+    }
+    return "Pozostałe";
+}
+
+/**
+ * af_sub3: identyfikator kliknięcia, a gdy go brak — {ad}|{keyword}.
+ * FIX: oryginał nie miał `return` przy clickid, więc gclid nigdy nie trafiał do af_sub3.
+ */
+function getClickOrAd(trafficData) {
+    if (trafficData.clickid) {
+        return trafficData.clickid;
+    }
+    if (!trafficData.ad && !trafficData.keyword) {
+        return "";
+    }
+    return (trafficData.ad || "") + "|" + (trafficData.keyword || "");
+}
+
+function getAdditionalParams(trafficData) {
+    var params = [
+        {"one": "af_channel", "value": "af_web_smartscript"},
+        {"one": "af_sub1", "value": trafficData.source},
+        {"one": "af_sub2", "value": trafficData.medium + "|" + trafficData.campaign},
+        {"one": "af_sub3", "value": getClickOrAd(trafficData)},
+        {"one": "af_sub4", "value": trafficData.cid}
+    ];
+    if (isRetargeting) {
+        params.push({"one": "is_retargeting", "value": "true"});
+    }
+    if (useDynamicLinks && !useDynamicLinksPreview) {
+        params.push({"dynamic": "efr", "value": "1"});
+    }
+    return params;
+}
+
+function getOverwriteParams(trafficData) {
+    if (version == "v1") {
+        return [
+            {"one": "pid", "value": "af_smartscript"},
+            {"one": "c", "value": "af_smartscript_campaign"}
+        ];
+    }
+    if (version == "v3") {
+        var group = getGroupedPID(trafficData);
+        return [
+            {"one": "pid", "value": group},
+            {"one": "c", "value": group}
+        ];
+    }
+    // v2
+    return [
+        {"one": "pid", "value": trafficData.source},
+        {"one": "c", "value": trafficData.medium + "|" + trafficData.campaign}
+    ];
+}
+
+function getAppData() {
+    var brand = DEFAULT_BRAND;
+    for (var i = 0; i < BRAND_HOSTS.length; i++) {
+        if (BRAND_HOSTS[i].pattern.test(document.location.hostname)) {
+            brand = BRAND_HOSTS[i].brand;
+            break;
+        }
+    }
+    var app = APPS[brand];
+    return {
+        oneLinkURL: app.oneLinkURL,
+        dynamicLinkURL: useDynamicLinks ? app.dynamicLinkURL : "",
+        deepLinkURL: document.location.href,
+        webLinkURL: document.location.href,
+        androidAppId: app.androidAppId,
+        iosAppId: app.iosAppId,
+        appStoreId: app.appStoreId
+    };
+}
+
+/* ==========================================================================
+ * URUCHOMIENIE
+ * ========================================================================== */
+function overwriteLinks(links) {
+    var trafficData = saver.getTrafficData(document.location.href, document.referrer, storage, attribution, testing);
+    var appData = getAppData();
+    var additionalParams = getAdditionalParams(trafficData);
+    var overwriteParams = getOverwriteParams(trafficData);
+    for (var i = 0; i < links.length; i++) {
+        links[i].href = generator.generateUrl(links[i].href, appData, trafficData, additionalParams, overwriteParams, testing);
+    }
+}
+
+// Uchwyt do debugowania z konsoli: window.__smartscript.saver.getTrafficData(...)
+window.__smartscript = {helper: helper, parser: parser, saver: saver, generator: generator};
+
+if (testing || !generator.isDesktop()) {
+    overwriteLinks(document.querySelectorAll(LINK_SELECTORS));
+}
+
+})();
+</script>

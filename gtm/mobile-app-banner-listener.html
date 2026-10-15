@@ -1,0 +1,68 @@
+<script>
+/**
+ * Mobile App Banner Listener — atrybucja web → app
+ *
+ * Tag GTM (Custom HTML), trigger: DOM Ready, uruchamiany raz na stronę.
+ * Baner „Pobierz aplikację” renderuje się asynchronicznie, już po DOM Ready, więc
+ * Smart Script nie widzi jego linków przy pierwszym uruchomieniu. Ten tag czeka na
+ * pojawienie się banera i wypycha do dataLayer zdarzenie `mobile_app_banner`,
+ * które ponownie odpala tag Smart Script.
+ */
+(function() {
+    'use strict';
+
+    // Klasa kontenera banera w szablonie sklepu
+    var BANNER_CLASS = "mobile-app-banner";
+    var EVENT_NAME = "mobile_app_banner";
+    // Flaga chroni przed podwójnym obserwatorem przy SPA (trigger `page`)
+    var FLAG = "__smartscriptBannerListener";
+
+    if (window[FLAG]) {
+        return;
+    }
+    window[FLAG] = true;
+
+    function notify() {
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({"event": EVENT_NAME});
+    }
+
+    function isBanner(node) {
+        if (node.nodeType !== 1) {
+            return false;
+        }
+        // FIX: oryginał porównywał className == "mobile-app-banner", co zawodziło przy wielu klasach
+        return (node.classList && node.classList.contains(BANNER_CLASS)) ||
+            !!(node.querySelector && node.querySelector("." + BANNER_CLASS));
+    }
+
+    // Baner już jest w DOM — wystarczy jedno zdarzenie
+    if (document.querySelector("." + BANNER_CLASS)) {
+        notify();
+    }
+
+    var MutationObserver = window.MutationObserver || window.WebKitMutationObserver;
+    if (!MutationObserver) {
+        return;
+    }
+
+    var observer = new MutationObserver(function(mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+                if (isBanner(added[j])) {
+                    notify();
+                    return;
+                }
+            }
+        }
+    });
+    // Obserwujemy body (a nie `.main` jak w oryginale) — odporne na zmiany szablonu
+    observer.observe(document.body, {childList: true, subtree: true});
+
+    // Bezpiecznik wydajności: po 30 s baner już się nie pojawi
+    setTimeout(function() {
+        observer.disconnect();
+    }, 30000);
+})();
+</script>
