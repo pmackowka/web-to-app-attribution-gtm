@@ -4,7 +4,8 @@
   "private": true,
   "description": "GTM Smart Script: web-to-app attribution via AppsFlyer OneLink",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "simulate": "node simulation/simulate.js"
   },
   "engines": {
     "node": ">=20"

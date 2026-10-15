@@ -11,7 +11,8 @@ Przewaga nad oficjalnym AppsFlyer Smart Script V2: persystencja źródła międz
 ## Komendy
 
 ```bash
-npm test        # 45 testów, node:test, Node ≥ 20, zero zależności
+npm test        # 46 testów, node:test, Node ≥ 20, zero zależności
+npm run simulate  # regeneruje simulation/simulation.csv (ścieżki → parametry w AppsFlyer)
 ```
 
 ## Struktura i zasady

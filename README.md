@@ -56,6 +56,10 @@ gtm/mobile-app-banner-listener.html    tag nasłuchujący na baner
 sql/smartscript_installs_check.sql     weryfikacja instalacji w BigQuery
 test/harness.js                        atrapa przeglądarki do uruchamiania tagu w Node
 test/smart-script.test.js              testy jednostkowe (45)
+test/simulation.test.js                kontrola aktualności CSV z symulacji
+simulation/scenarios.js                hipotetyczne ścieżki użytkownika
+simulation/simulate.js                 symulator: ścieżka → parametry w AppsFlyer
+simulation/simulation.csv              wynik symulacji (podgląd jako tabela na GitHubie)
 ```
 
 ## Wdrożenie w GTM
@@ -149,6 +153,14 @@ Pokrycie: mapowanie v1/v2/v3, parser źródeł, warunki pominięcia (desktop, Fa
 ```js
 window.__smartscript.saver.getTrafficData(location.href, document.referrer, "cookie", "lastClick", true)
 ```
+
+**Symulacja ścieżek** — [`simulation/simulation.csv`](simulation/simulation.csv) pokazuje, jakie parametry trafiłyby do AppsFlyer dla hipotetycznych ścieżek użytkownika (`simulation/scenarios.js`). Każda ścieżka jest liczona dla 3 modeli atrybucji × 3 wersji mapowania. Kolumny mają nazwy jak w raw data AppsFlyer: `pid` → `media_source`, `c` → `campaign`, dalej `af_sub1–4`. `campaign_params_on_click_page = no` oznacza ścieżkę, w której oficjalny Smart Script nie miałby czego przeczytać, bo na stronie z banerem nie ma parametrów kampanii.
+
+```bash
+npm run simulate   # po zmianie tagu albo scenariuszy; test pilnuje, żeby CSV był aktualny
+```
+
+Symulacja pokazuje tylko link, który wyjdzie ze strony. Tego, czy AppsFlyer przypisze instalację (okno lookback, inne kliknięcia, SRN), nie symuluje. Ruch z `fbclid` celowo nie jest przepisywany: Meta jest SRN i atrybuuje instalacje sama.
 
 **Dane w BigQuery** — `sql/smartscript_installs_check.sql`: instalacje z `af_channel = 'af_web_smartscript'` per marka, z rozbiciem na `af_sub1–4` i odsetkiem instalacji z GA client id. Zapytanie nie było uruchomione na danych — przy pierwszym użyciu zrób dry-run.
 
