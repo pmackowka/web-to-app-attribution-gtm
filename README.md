@@ -6,16 +6,17 @@ Smart Script w Google Tag Manager: zapamiętuje źródło ruchu na stronie www i
 
 ## Ten skrypt a oficjalny Smart Script AppsFlyer
 
-AppsFlyer ma własny [OneLink Smart Script V2](https://dev.appsflyer.com/hc/docs/dl_smart_script_v2) (`AF_SMART_SCRIPT.generateOneLinkURL`). Rozwiązuje część tego samego problemu, ale **czyta tylko bieżący URL**. Ten projekt zapamiętuje źródło ruchu między odsłonami i sesjami, a to jest jego właściwa wartość.
+AppsFlyer ma własny [OneLink Smart Script V2](https://dev.appsflyer.com/hc/docs/dl_smart_script_v2) (`AF_SMART_SCRIPT.generateOneLinkURL`). Rozwiązuje część tego samego problemu, ale **pamięta krótko**: od wersji 2.5.0, przy skrypcie na każdej stronie, trzyma parametry wejścia w `localStorage` przez 2 godziny (sprawdzone w kodzie buildu 2.10.4). Ten projekt zapamiętuje źródło na 30 dni, wybiera je według modelu atrybucji i wnioskuje z click id bez UTM — to jest jego właściwa wartość.
 
 | | Ten projekt | Oficjalny Smart Script V2 |
 |---|---|---|
-| Źródło danych | wejście zapisane w cookie `_smsc` (30 dni) | tylko parametry bieżącego URL |
-| Scenariusz: reklama → strona A → strona C → klik w baner | atrybucja do reklamy | brak UTM na stronie C → atrybucja utracona |
-| Modele atrybucji | `default` (last non-direct), `lastClick`, `lastPaid` | brak — ostatni URL |
-| Wnioskowanie źródła bez UTM (referrer, organic) | tak, logika Universal Analytics | nie — opcja `webReferrer` kopiuje tylko surowy `document.referrer` |
+| Pamięć źródła | cookie `_smsc`, 30 dni (Safari: 1–7 dni przez ITP) | parametry URL w `localStorage`, 2 h; referrer bez wygasania |
+| Scenariusz: reklama → strona A → strona C → klik w baner (kilka minut) | atrybucja do reklamy | atrybucja do reklamy, gdy skrypt jest na każdej stronie i wejście ma UTM |
+| Scenariusz: reklama → powrót direct po 3 dniach → baner | atrybucja do reklamy (`default`, `lastPaid`) | parametry wygasły → atrybucja utracona |
+| Modele atrybucji | `default` (last non-direct), `lastClick`, `lastPaid` | brak — najnowsze wejście z parametrami |
+| Wnioskowanie źródła bez UTM | `gclid` → `google / cpc`, Google organic, `{host} / referral`, direct | opcja SEO (od 2.10.3) rozpoznaje wyszukiwarki i asystentów AI; reszta jako surowy `document.referrer`; z samego `gclid` źródła nie wywnioskuje |
 | GA client id w `af_sub4` (zszycie web + app w BigQuery) | tak | nie (możliwe ręcznie przez parametry własne) |
-| Click id | `gclid`, `dclid`, `fbclid` | `gclid`, `fbclid` (od 2.8.1), `ttclid`, `twclid`, `ScCid` (od 2.10.0) |
+| Click id | `gclid`, `dclid`, `fbclid` z pamięci, do `af_sub3` (raw data) | 7 typów (m.in. `gbraid`, `wbraid`) tylko z bieżącego URL-a; `gclid` z pamięci 2 h przez `googleClickIdKey` |
 | QR kod dla desktopu, impressions | nie | tak |
 | Utrzymanie | własny kod | biblioteka AppsFlyer |
 
@@ -119,7 +120,8 @@ Grupy w v3 (`getGroupedPID`, wzorce przykładowe):
 |---|---|
 | `retargeting_a`, `retargeting_b` | Remarketing zewnętrzny |
 | `display_a`, `display_b`, `dfa` | Display |
-| `google`, `bing`, `yahoo`, `duckduckgo` | Organic |
+| `google`, `bing`, `yahoo`, `duckduckgo` przy medium `organic` | Organic |
+| `google`, `bing`, `yahoo`, `duckduckgo` przy innym medium (np. `cpc`, sam `gclid`) | Wyszukiwarka płatna |
 | `webpush_a` | Web push |
 | `partner_a`, `partner_b`, `partner_c` | Afiliacja |
 | pozostałe | Pozostałe |
@@ -136,7 +138,7 @@ W v3 grupa trafia też do `c` — tak zachowywał się skrypt w scenariuszach te
 
 „Bezpłatne” = medium `(none)`, `organic` albo `referral`. Każde inne medium skrypt traktuje jako płatne — także `email`, co ma znaczenie przy `lastPaid`.
 
-Nowe źródło jest odczytywane tylko przy wejściu z zewnątrz: ruch płatny i z UTM zawsze, ruch bez oznaczeń raz na sesję przeglądarki (`_smsess`). Nawigacja wewnętrzna i wirtualne odsłony SPA nie zmieniają źródła.
+Nowe źródło jest odczytywane tylko przy wejściu z zewnątrz: ruch płatny i z UTM zawsze, ruch bez oznaczeń raz na sesję przeglądarki (`_smsess`). Wejście płatne i z UTM też otwiera tę sesję, więc nawigacja wewnętrzna i wirtualne odsłony SPA (URL bez parametrów, `document.referrer` nadal zewnętrzny) nie zmieniają źródła.
 
 ## Weryfikacja
 
@@ -146,7 +148,7 @@ Nowe źródło jest odczytywane tylko przy wejściu z zewnątrz: ruch płatny i 
 npm test
 ```
 
-Pokrycie: mapowanie v1/v2/v3, parser źródeł, warunki pominięcia (desktop, Facebook, `af_redirect`), enkodowanie i limity długości, Dynamic Links, trzy modele atrybucji na sekwencjach odsłon, storage i odporność na uszkodzone dane. Testy sprawdzono mutacyjnie: przywrócenie błędów z pierwotnej wersji (brak `return` w `af_sub3`, wywołanie `parser.getSource()`) wywraca odpowiednio 2 i 28 testów.
+Pokrycie: mapowanie v1/v2/v3, parser źródeł, warunki pominięcia (desktop, Facebook, `af_redirect`), enkodowanie i limity długości, Dynamic Links, trzy modele atrybucji na sekwencjach odsłon, storage i odporność na uszkodzone dane. Testy sprawdzono mutacyjnie: przywrócenie błędów z pierwotnej wersji (brak `return` w `af_sub3`, wywołanie `parser.getSource()`) wywraca odpowiednio 4 i 32 testy, a cofnięcie poprawki SPA (`_smsess` przy wejściu płatnym i z UTM) — 2.
 
 **Debug w przeglądarce:**
 
@@ -168,7 +170,7 @@ Symulacja pokazuje tylko link, który wyjdzie ze strony. Tego, czy AppsFlyer prz
 ## Stan zależności (październik 2026)
 
 1. **Firebase Dynamic Links nie działają** — Google wyłączył usługę 25.08.2025. Ścieżka `useDynamicLinks` zostaje wyłącznie dla zgodności wstecznej.
-2. **iOS i click id** — Google Ads na iOS przekazuje często `gbraid`/`wbraid` zamiast `gclid`. Skrypt ich nie obsługuje, więc część ruchu z iOS ląduje jako `google / cpc` bez identyfikatora. Do dopisania w `parseClickID`.
+2. **iOS i click id** — Google Ads na iOS przekazuje często `gbraid`/`wbraid` zamiast `gclid`. Skrypt ich nie obsługuje, więc takie wejście bez UTM ląduje jako `google / organic` (referrer z Google) albo `direct` (bez referrera), a nie jako `google / cpc`. Do dopisania w `parseClickID`.
 3. **Limit `pid`** — skrypt ucina do 50 znaków. Aktualna dokumentacja AppsFlyer podaje 150; niezweryfikowane na stronie źródłowej, więc zostaje bezpieczne 50.
 4. **`window.orientation`** jako detekcja mobile jest przestarzałe w specyfikacji, ale nadal obecne w mobilnych Safari i Chrome. Zamiennik: `matchMedia('(pointer: coarse)')` albo `navigator.userAgentData.mobile`.
 

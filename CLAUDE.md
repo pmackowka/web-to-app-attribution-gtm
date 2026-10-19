@@ -6,12 +6,12 @@ Kontekst projektu dla kolejnych sesji. Pełny opis mechanizmu, konfiguracji GTM 
 
 `web-to-app-attribution-gtm` — tag GTM (Custom HTML), który zapamiętuje źródło ruchu na www (UTM, `gclid`/`dclid`/`fbclid`, referrer, GA client id) w cookie `_smsc` i na mobile przepisuje linki do App Store / Google Play / OneLink na AppsFlyer OneLink z parametrami kampanii. Cel: instalacja i zakup w aplikacji przypisane do kampanii, która przyprowadziła użytkownika na stronę. Rekonstrukcja wdrożenia z 2021 r., z poprawkami błędów i testami. Repozytorium prywatne na GitHubie (`pmackowka/web-to-app-attribution-gtm`).
 
-Przewaga nad oficjalnym AppsFlyer Smart Script V2: persystencja źródła między odsłonami i modele atrybucji. Oficjalny skrypt czyta tylko bieżący URL. Porównanie: README, sekcja „Ten skrypt a oficjalny Smart Script AppsFlyer”.
+Przewaga nad oficjalnym AppsFlyer Smart Script V2: pamięć źródła na 30 dni, modele atrybucji i wnioskowanie źródła z click id bez UTM. Oficjalny skrypt (2.5.0+) trzyma parametry wejścia w `localStorage` tylko 2 godziny. Porównanie: README, sekcja „Ten skrypt a oficjalny Smart Script AppsFlyer”.
 
 ## Komendy
 
 ```bash
-npm test        # 46 testów, node:test, Node ≥ 20, zero zależności
+npm test        # 49 testów, node:test, Node ≥ 20, zero zależności
 npm run simulate  # regeneruje simulation/simulation.csv (ścieżki → parametry w AppsFlyer)
 ```
 
