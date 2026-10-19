@@ -211,12 +211,17 @@ var parser = (function() {
      */
     instance.isOutsideTraffic = function(url, referrer) {
         var refHost = instance.parseReferrer(referrer);
+        // FIX: wejście płatne i z UTM też otwiera sesję źródła. Bez tego w SPA
+        // wirtualna odsłona (URL bez parametrów, document.referrer nadal z Google)
+        // liczyła się jako nowe wejście z wyszukiwarki i nadpisywała kampanię.
         if (instance.isPaid(url, referrer)) {
+            helper.makeCookie(COOKIE_NAME, "true");
             return true;
         }
         var utms = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
         for (var i = 0; i < utms.length; i++) {
             if (helper.getParam(utms[i], url)) {
+                helper.makeCookie(COOKIE_NAME, "true");
                 return true;
             }
         }
@@ -664,8 +669,10 @@ function getGroupedPID(trafficData) {
     if (/display_a|display_b|dfa/i.test(source)) {
         return "Display";
     }
+    // FIX: wyszukiwarka to Organic tylko przy medium organic — wcześniej
+    // google / cpc (Google Ads, także sam gclid) też trafiało do grupy Organic.
     if (/google|bing|yahoo|duckduckgo/i.test(source)) {
-        return "Organic";
+        return trafficData.medium == "organic" ? "Organic" : "Wyszukiwarka płatna";
     }
     if (/webpush_a/i.test(source)) {
         return "Web push";

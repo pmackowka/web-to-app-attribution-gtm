@@ -58,7 +58,6 @@ test.describe('mapowanie parametrów OneLink', () => {
       retargeting_a: 'Remarketing zewnętrzny',
       retargeting_b: 'Remarketing zewnętrzny',
       display_a: 'Display',
-      google: 'Organic',
       webpush_a: 'Web push',
       partner_a: 'Afiliacja',
       newsletter: 'Pozostałe',
@@ -67,6 +66,20 @@ test.describe('mapowanie parametrów OneLink', () => {
       const url = `https://www.example-shop.pl/?utm_source=${source}&utm_medium=x`;
       const { links } = runPage(createBrowser(), { url, links: [PLAY], config: { version: '"v3"' } });
       assert.equal(params(links[0]).pid, group, `source=${source}`);
+    }
+  });
+
+  test('v3: wyszukiwarka — organic osobno, płatne osobno', () => {
+    const cases = {
+      'utm_source=google&utm_medium=organic': 'Organic',
+      'utm_source=bing&utm_medium=organic': 'Organic',
+      'utm_source=google&utm_medium=cpc': 'Wyszukiwarka płatna',
+      'gclid=G1': 'Wyszukiwarka płatna',
+    };
+    for (const [query, group] of Object.entries(cases)) {
+      const url = `https://www.example-shop.pl/?${query}`;
+      const { links } = runPage(createBrowser(), { url, links: [PLAY], config: { version: '"v3"' } });
+      assert.equal(params(links[0]).pid, group, query);
     }
   });
 
@@ -310,6 +323,23 @@ test.describe('modele atrybucji', () => {
     visit(b, 'lastClick', paid);
     const { links } = visit(b, 'lastClick', HOST + 'damskie', HOST);
     assert.equal(params(links[0]).pid, 'google');
+  });
+
+  test('SPA: wirtualna odsłona z zewnętrznym referrerem nie nadpisuje wejścia płatnego', () => {
+    // pushState zmienia URL, ale document.referrer zostaje z wejścia (Google)
+    for (const model of ['default', 'lastClick', 'lastPaid']) {
+      const b = createBrowser();
+      visit(b, model, paid, 'https://www.google.com/');
+      const { links } = visit(b, model, HOST + 'damskie', 'https://www.google.com/');
+      assert.equal(params(links[0]).af_sub3, 'G1', model);
+    }
+  });
+
+  test('SPA: wirtualna odsłona po wejściu z UTM zachowuje kampanię', () => {
+    const b = createBrowser();
+    visit(b, 'lastClick', HOST + '?utm_source=newsletter&utm_medium=email', 'https://mail.example.com/');
+    const { links } = visit(b, 'lastClick', HOST + 'damskie', 'https://mail.example.com/');
+    assert.equal(params(links[0]).pid, 'newsletter');
   });
 
   test('pierwsza odsłona bez zapisanych danych działa w każdym modelu', () => {
