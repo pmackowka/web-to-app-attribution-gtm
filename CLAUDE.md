@@ -4,7 +4,7 @@ Kontekst projektu dla kolejnych sesji. Pełny opis mechanizmu, konfiguracji GTM 
 
 ## Co to jest
 
-`web-to-app-attribution-gtm` — tag GTM (Custom HTML), który zapamiętuje źródło ruchu na www (UTM, `gclid`/`dclid`/`fbclid`, referrer, GA client id) w cookie `_smsc` i na mobile przepisuje linki do App Store / Google Play / OneLink na AppsFlyer OneLink z parametrami kampanii. Cel: instalacja i zakup w aplikacji przypisane do kampanii, która przyprowadziła użytkownika na stronę. Rekonstrukcja wdrożenia z 2021 r., z poprawkami błędów i testami. Repozytorium prywatne na GitHubie (`pmackowka/web-to-app-attribution-gtm`).
+`web-to-app-attribution-gtm` — tag GTM (Custom HTML), który zapamiętuje źródło ruchu na www (UTM, `gclid`/`dclid`/`fbclid`, referrer, GA client id) w cookie `_smsc` i na mobile przepisuje linki do App Store / Google Play / OneLink na AppsFlyer OneLink z parametrami kampanii. Cel: instalacja i zakup w aplikacji przypisane do kampanii, która przyprowadziła użytkownika na stronę. Rekonstrukcja wdrożenia z 2021 r., z poprawkami błędów i testami. Repozytorium publiczne na GitHubie (`pmackowka/web-to-app-attribution-gtm`, MIT).
 
 Przewaga nad oficjalnym AppsFlyer Smart Script V2: pamięć źródła na 30 dni, modele atrybucji i wnioskowanie źródła z click id bez UTM. Oficjalny skrypt (2.5.0+) trzyma parametry wejścia w `localStorage` tylko 2 godziny. Porównanie: README, sekcja „Ten skrypt a oficjalny Smart Script AppsFlyer”.
 
