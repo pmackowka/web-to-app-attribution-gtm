@@ -1,0 +1,22 @@
+# Testy jednostkowe tagów GTM przy każdym pushu i PR.
+# Projekt nie ma zależności npm, więc wystarczy sam Node i `npm test`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      # Node 24: package.json wymaga >= 20, a Node 20 jest wycofywany na runnerach.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm test

@@ -1,5 +1,7 @@
 # web-to-app-attribution-gtm
 
+[![CI](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml/badge.svg)](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml)
+
 Smart Script w Google Tag Manager: zapamiętuje źródło ruchu na stronie www i przekazuje je do aplikacji mobilnej przez AppsFlyer OneLink. Dzięki temu instalacja i zakup w aplikacji trafiają do kampanii, która przyprowadziła użytkownika na stronę.
 
 **Problem:** część użytkowników trafia na stronę z reklamy (Google Ads, retargeting, newsletter), a potem klika baner „Pobierz aplikację”, instaluje ją i kupuje już w aplikacji. AppsFlyer widzi taką instalację jako ruch „z www” albo organic. Informacja, że użytkownika przyprowadziła kampania, ginie na granicy web → app.
