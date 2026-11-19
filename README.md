@@ -31,16 +31,7 @@ Rekomendacja dla nowego wdrożenia: oficjalny Smart Script V2 do budowy linku i 
 3. Na urządzeniach mobilnych przepisuje linki do App Store, Google Play i OneLink na OneLink z parametrami kampanii (`pid`, `c`, `af_sub1–4`, `af_channel=af_web_smartscript`).
 4. AppsFlyer przypisuje instalację i późniejsze zakupy w aplikacji do kampanii webowej. `af_sub4` (GA client id) pozwala zszyć ścieżkę web i app w BigQuery.
 
-```
- reklama ──► www (mobile) ──────────────────────► klik w baner ──► OneLink ──► sklep ──► instalacja ──► zakup w app
-             │                                     ▲                  │
-             │ Smart Script (DOM Ready / page)     │ href przepisany  │ pid, c, af_sub1-4,
-             │  parser: UTM, click id, referrer    │ na OneLink       │ af_channel=af_web_smartscript
-             │  saver:  _smsc (30 dni) + model     │                  ▼
-             │  generator: buduje OneLink ─────────┘              AppsFlyer: atrybucja do kampanii web
-             │
-             └ Mobile App Banner Listener: baner wyrenderował się później → event mobile_app_banner → Smart Script jeszcze raz
-```
+Diagram sekwencji UML całego przepływu: [`uml-diagram.md`](uml-diagram.md).
 
 | Obiekt | Odpowiada za | Publiczne API |
 |---|---|---|
@@ -50,8 +41,6 @@ Rekomendacja dla nowego wdrożenia: oficjalny Smart Script V2 do budowy linku i 
 | `generator` | budowa finalnego linku OneLink / Dynamic Link | `generator.generateUrl(currentURL, appData, trafficData, additionalParams, overwriteParams, testing)` |
 
 Do debugowania obiekty są dostępne w konsoli jako `window.__smartscript`.
-
-Diagram sekwencji UML całego przepływu: [`uml-diagram.md`](uml-diagram.md).
 
 ## Struktura repozytorium
 
