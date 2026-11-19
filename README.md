@@ -51,6 +51,8 @@ Rekomendacja dla nowego wdrożenia: oficjalny Smart Script V2 do budowy linku i 
 
 Do debugowania obiekty są dostępne w konsoli jako `window.__smartscript`.
 
+Diagram sekwencji UML całego przepływu: [`uml-diagram.md`](uml-diagram.md).
+
 ## Struktura repozytorium
 
 ```
