@@ -1,6 +1,6 @@
 # web-to-app-attribution-gtm
 
-[![CI](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml/badge.svg)](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml)
+[![CI](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml/badge.svg)](https://github.com/pmackowka/web-to-app-attribution-gtm/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/github/license/pmackowka/web-to-app-attribution-gtm)](LICENSE)
 
 Smart Script w Google Tag Manager: zapamiętuje źródło ruchu na stronie www i przekazuje je do aplikacji mobilnej przez AppsFlyer OneLink. Dzięki temu instalacja i zakup w aplikacji trafiają do kampanii, która przyprowadziła użytkownika na stronę.
 
